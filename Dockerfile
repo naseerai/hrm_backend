@@ -1,11 +1,18 @@
-bcrypt==4.0.1
-fastapi>=0.123.5
-passlib[bcrypt]==1.7.4
-postgrest>=2.24.0
-pydantic[email]>=2.12.5
-pyngrok>=7.5.0
-python-dotenv>=1.2.1
-supabase>=2.24.0
-uvicorn>=0.38.0
-email-validator
-python-jose
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
