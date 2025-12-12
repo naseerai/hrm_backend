@@ -44,7 +44,7 @@ jobs:
 
           echo "=== Docker cleanup ==="
           docker compose down || true
-          docker images | grep "hrm_backend-main" | awk '{print $3}' | xargs -r docker rmi -f || true
+          docker images | grep "hrm-backend-main" | awk '{print $3}' | xargs -r docker rmi -f || true
 
           echo "=== Build new image ==="
           docker compose build --no-cache
