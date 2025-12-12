@@ -1,4 +1,7 @@
 .env
 .__pycache__
 .venv
-.supabase
+/supabase
+src/__pycache__
+src/common_routes/__pycache__
+src/login/__pycache__
