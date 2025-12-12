@@ -4,14 +4,26 @@ import string
 import os
 from supabase import create_client
 from fastapi import APIRouter, HTTPException, status, Depends
-
-
+import aiosmtplib
+import asyncio
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from .common_setting import SUPABASE_URL, SUPABASE_ANON_KEY,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD
+import smtplib
+import ssl
+from jinja2 import Template
 import logging
-
+from passlib.context import CryptContext
 from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+
+
 
 async def generate_user_based_password(
     name: str,
@@ -60,8 +72,8 @@ async def generate_user_based_password(
 def get_supabase_client() -> Client:
     try:
         logger.debug("Creating Supabase client for user routes")
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_ANON_KEY")  # use service key for writes [web:161]
+        url = SUPABASE_URL
+        key = SUPABASE_ANON_KEY # use service key for writes [web:161]
         print(f"Supabase URL: {url}, Key: {key}")
         if not url or not key:
             logger.warning("Supabase URL or key not configured")
@@ -79,3 +91,40 @@ def get_supabase_client() -> Client:
 
 
 
+async def send_email(template_path, data, receiver_email,subject, smtp_server, smtp_port, username, password):
+    try:
+        # Load HTML template
+        with open(template_path, 'r', encoding='utf-8') as file:
+            template = file.read()
+
+        # Render template with data using Jinja2
+        template_obj = Template(template)
+        email_body = template_obj.render(**data)
+
+        
+
+        # Build email message
+        msg = MIMEMultipart('alternative')
+        msg['From'] = username
+        msg['To'] = receiver_email
+        msg['Subject'] = subject
+        msg['Return-Path'] = username  # bounce address
+        msg['Delivery-Status-Notification'] = 'Success, Failure'
+        msg.attach(MIMEText(email_body, 'html', 'utf-8'))
+
+        # Create SSL context
+        context = ssl.create_default_context()
+
+        # Connect to SMTP server over SSL (port 465)
+        with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:
+            server.set_debuglevel(0)  # Set to 0 in production, 1 for debugging
+            server.login(username, password)
+            server.send_message(msg)
+
+        print(f"Email sent successfully to {receiver_email}!")
+        return True
+
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        return False
+        
