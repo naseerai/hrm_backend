@@ -42,14 +42,16 @@ jobs:
           echo "=== Copy .env.local → .env ==="
           cp .env.local .env
 
-          echo "=== Docker cleanup ==="
+          echo "=== Stopping existing container ==="
           docker compose down || true
-          docker images | grep "hrm-backend-main" | awk '{print $3}' | xargs -r docker rmi -f || true
 
-          echo "=== Build new image ==="
+          echo "=== Remove old backend image ==="
+          docker images | grep "hrm_backend-backend" | awk '{print $3}' | xargs -r docker rmi -f || true
+
+          echo "=== Building new backend image ==="
           docker compose build --no-cache
 
-          echo "=== Start container ==="
+          echo "=== Starting new backend container ==="
           docker compose up -d
 
           echo "=== DEPLOYMENT SUCCESS ==="
