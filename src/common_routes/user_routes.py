@@ -128,7 +128,7 @@ def read_me(user_id: str = Depends(get_current_user_id) , supabase: Client = Dep
             )
 
         logger.info("Fetched user details for user_id=%s", user_id)
-        return res.data[0]
+        return res.data
     except HTTPException as he:
         raise he
     except Exception as e:
