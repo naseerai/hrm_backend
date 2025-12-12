@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Deployment to Server
+    - name: Deploy to Server
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.SERVER_IP }}
@@ -17,28 +17,39 @@ jobs:
         key: ${{ secrets.SERVER_SSH_KEY }}
         script: |
           REPO_DIR="/root/projects/backend/hrm_backend"
-          REPO_URL="https://github.com/naseerai/hrm_backend.git"
+          REPO_URL="git@github.com:naseerai/hrm_backend.git"
+
+          echo "=== Configure Git SSH Key ==="
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/hrm_key -o StrictHostKeyChecking=no"
+
           echo "=== Check repo exists ==="
           if [ ! -d "$REPO_DIR/.git" ]; then
-            echo "Repo not found. Cloning..."
+            echo "Repo not found. Cloning fresh..."
             mkdir -p /root/projects/backend
             cd /root/projects/backend
             git clone $REPO_URL
           else
-            echo "Repo exists. Pulling latest code..."
+            echo "Repo exists. Cleaning and pulling latest code..."
             cd $REPO_DIR
+            git reset --hard HEAD
+            git clean -fd
             git pull origin main
           fi
+
           echo "=== Entering repo ==="
           cd $REPO_DIR
+
           echo "=== Copy .env.local → .env ==="
           cp .env.local .env
-          echo "=== Removing old container ==="
+
+          echo "=== Docker cleanup ==="
           docker compose down || true
-          echo "=== Removing old image ==="
           docker images | grep "hrm_backend-main" | awk '{print $3}' | xargs -r docker rmi -f || true
-          echo "=== Build new image (no cache) ==="
+
+          echo "=== Build new image ==="
           docker compose build --no-cache
-          echo "=== Start new container ==="
+
+          echo "=== Start container ==="
           docker compose up -d
+
           echo "=== DEPLOYMENT SUCCESS ==="
