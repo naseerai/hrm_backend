@@ -1,4 +1,3 @@
-text
 # HRM 
 
 A FastAPI project using uv for dependency management.
