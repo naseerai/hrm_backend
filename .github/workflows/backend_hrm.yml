@@ -29,11 +29,11 @@ jobs:
             cd /root/projects/backend
             git clone $REPO_URL
           else
-            echo "Repo exists. Cleaning and pulling latest code..."
+            echo "Repo exists. Force syncing with origin/main..."
             cd $REPO_DIR
-            git reset --hard HEAD
+            git fetch origin
+            git reset --hard origin/main
             git clean -fd
-            git pull origin main
           fi
 
           echo "=== Entering repo ==="
@@ -46,7 +46,7 @@ jobs:
           docker compose down || true
 
           echo "=== Remove old backend image ==="
-          docker images | grep "hrm_backend-backend" | awk '{print $3}' | xargs -r docker rmi -f || true
+          docker images "hrm_backend-backend" -q | xargs -r docker rmi -f || true
 
           echo "=== Building new backend image ==="
           docker compose build --no-cache
