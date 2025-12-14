@@ -13,3 +13,8 @@ class UserUpdate(BaseModel):
     email: EmailStr
     role: str | None = None
     mobile: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    user_id: str
+    new_password: str

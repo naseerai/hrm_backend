@@ -83,14 +83,14 @@ def authenticate_with_supabase(email: str, password: str, supabase: Client) -> s
             raise HTTPException(status_code=401, detail="Invalid credentials")
         
         user = res.data[0]
-        print(f"👤 User found: \n\n{user}\n\n, hash preview: {user['password'][:20]}...")
+        # print(f"👤 User found: \n\n{user}\n\n, hash preview: {user['password'][:20]}...")
         
         # 2. Test hash verification
         stored_hash = user['password']
 
         is_valid = pwd_context.verify(password, stored_hash)
-        print(f"🔑 Password valid: {is_valid}")
-        print(f"   Input hash: {pwd_context.hash(password)[:20]}...")
+        # print(f"🔑 Password valid: {is_valid}")
+        # print(f"   Input hash: {pwd_context.hash(password)[:20]}...")
         # print(f"   Stored hash: {stored_hash[:20]}...")
         
         if not is_valid:
@@ -136,3 +136,6 @@ def get_current_user_id(
         )
     logger.debug("Authenticated request for user_id=%s", sub)
     return str(sub)
+
+
+

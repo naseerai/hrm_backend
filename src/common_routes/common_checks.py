@@ -22,9 +22,6 @@ logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-
-
-
 async def generate_user_based_password(
     name: str,
     email: str,
