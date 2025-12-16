@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 @router.post("/create/user", status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: UserCreate,
-    supabase: Client = Depends(get_supabase_client),background_tasks: BackgroundTasks = None,user_id: str = Depends(get_current_user_id)
+    supabase: Client = Depends(get_supabase_client),background_tasks: BackgroundTasks =None,user_id: str = Depends(get_current_user_id)
 ):
     # Check duplicate email
     try:
@@ -54,7 +54,9 @@ async def create_user(
             "role": payload.role,
             "mobile": payload.mobile,
             "createdby": payload.created_by,
+            "designation": payload.designation,
         }
+
         mail_data = {
             "name": payload.name,
             "office_mail": payload.office_mail,
@@ -84,9 +86,43 @@ async def create_user(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create user",
             )
-
-        # Return minimal info (you can shape this how you like)
         created = res.data[0]
+        if payload.designation == "team_lead":
+            # Additional logic for team leaders can be added here
+            adding_team_leader = supabase.table("teams").insert({"team_lead":created.get("id")}).execute()
+            logger.info("Additional setup for team leader email=%s", adding_team_leader)
+
+        elif payload.designation == "team_member":
+            team_lead_id = payload.team_lead_id
+
+            # 1) Get the current team row for that leader
+            team_res = (
+                supabase
+                .table("teams")
+                .select("id, team_members")
+                .eq("team_lead", team_lead_id)
+                .maybe_single()
+                .execute()
+            )
+
+            team = team_res.data
+            if not team:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Team for the given team_lead_id not found",
+                )
+
+            current_members = team.get("team_members") or []
+            if created["id"] not in current_members:
+                new_members = current_members + [created["id"]]
+
+                # 2) Save the updated list
+                supabase.table("teams").update(
+                    {"team_members": new_members}
+                ).eq("team_lead", team_lead_id).execute()
+            logger.info("Additional setup for team member email=%s", team_lead_id)
+                # Return minimal info (you can shape this how you like)
+                
         logger.info("User created successfully user_id=%s email=%s", created.get("id"), created.get("email"))
         return {
             "id": created.get("id"),
@@ -175,8 +211,7 @@ def get_all_users(
 @router.patch("/update/{user_id}", summary="Update user details")
 def update_user(
     user_id: str,
-    payload: UserUpdate,
-    _: str = Depends(get_current_user_id),        # require auth
+    payload: UserUpdate,        # require auth
     supabase: Client = Depends(get_supabase_client),
 ):
     # Build dict of only provided fields
@@ -398,3 +433,94 @@ async def change_user_password(
     
 
 
+
+
+@router.get("/team/leads",summary="Get all team leads")
+async def get_all_team_leads(
+    _: str = Depends(get_current_user_id),       # require auth
+    supabase: Client = Depends(get_supabase_client),
+):
+    """
+    Returns all users with designation 'team_lead'.
+    """
+    try:
+        logger.info("Fetching all team leads requested by user_id=%s", _)
+        res = supabase.table("users").select("*").eq("designation", "team_lead").execute()  # [web:15]
+
+        if getattr(res, "error", None):
+            logger.error("Failed to fetch team leads: %s", res.error)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch team leads",
+            )
+        logger.info("Fetched %d team leads", len(res.data))
+        return res.data
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.exception("Error fetching team leads: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch team leads",
+        )
+    
+@router.get("/team/members/{team_lead_id}",summary="Get team members for a team lead")
+async def get_team_members(
+    team_lead_id: str,
+    _: str = Depends(get_current_user_id),       # require auth
+    supabase: Client = Depends(get_supabase_client),
+    ):
+    """
+    Returns all team members for the given team lead ID.
+    """
+    try:
+        logger.info("Fetching team members for team_lead_id=%s requested by user_id=%s", team_lead_id, _)
+        team_res = (
+            supabase
+            .table("teams")
+            .select("team_members")
+            .eq("team_lead", team_lead_id)
+            .maybe_single()
+            .execute()
+        )
+
+        if getattr(team_res, "error", None):
+            logger.error("Failed to fetch team for team_lead_id=%s: %s", team_lead_id, team_res.error)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch team members",
+            )
+
+        team = team_res.data
+        if not team or not team.get("team_members"):
+            logger.warning("No team members found for team_lead_id=%s", team_lead_id)
+            return []
+
+        member_ids = team["team_members"]
+
+        members_res = (
+            supabase
+            .table("users")
+            .select("*")
+            .in_("id", member_ids)
+            .execute()
+        )
+
+        if getattr(members_res, "error", None):
+            logger.error("Failed to fetch team members for team_lead_id=%s: %s", team_lead_id, members_res.error)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch team members",
+            )
+
+        logger.info("Fetched %d team members for team_lead_id=%s", len(members_res.data), team_lead_id)
+        return members_res.data
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.exception("Error fetching team members for team_lead_id=%s: %s", team_lead_id, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch team members",
+        )

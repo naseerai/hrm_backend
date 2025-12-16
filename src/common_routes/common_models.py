@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr 
 
 class UserCreate(BaseModel):
     name: str
@@ -7,10 +7,12 @@ class UserCreate(BaseModel):
     role: str | None = None
     mobile: str | None = None
     created_by: str | None = None
+    designation: str | None = None
+    team_lead_id: str | None = None
 
 class UserUpdate(BaseModel):
-    name: str
-    email: EmailStr
+    name: str | None = None
+    email: EmailStr | None = None
     role: str | None = None
     mobile: str | None = None
 
