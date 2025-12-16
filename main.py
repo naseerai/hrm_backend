@@ -5,6 +5,7 @@ from src.common_routes.user_routes import router as user_router
 app = FastAPI()
 import logging
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from src.career_routes.careers_routes import router as careers_router
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -22,4 +23,5 @@ app.add_middleware(
 
 app.include_router(login_router)
 app.include_router(user_router)
+app.include_router(careers_router)
 
