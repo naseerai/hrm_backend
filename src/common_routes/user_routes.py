@@ -433,8 +433,6 @@ async def change_user_password(
     
 
 
-
-
 @router.get("/team/leads",summary="Get all team leads")
 async def get_all_team_leads(
     _: str = Depends(get_current_user_id),       # require auth
@@ -464,6 +462,38 @@ async def get_all_team_leads(
             detail="Failed to fetch team leads",
         )
     
+
+@router.get("/team/members",summary="Get all team members")
+async def get_all_team_members(
+    _: str = Depends(get_current_user_id),       # require auth
+    supabase: Client = Depends(get_supabase_client),
+):
+    """
+    Returns all users with designation 'team_member'.
+    """
+    try:
+        logger.info("Fetching all team members requested by user_id=%s", _)
+        res = supabase.table("users").select("*").eq("designation", "team_member").execute()  # [web:15]
+
+        if getattr(res, "error", None):
+            logger.error("Failed to fetch team members: %s", res.error)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch team members",
+            )
+        logger.info("Fetched %d team members", len(res.data))
+        return res.data
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.exception("Error fetching team members: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch team members",
+        )
+
+
+
 @router.get("/team/members/{team_lead_id}",summary="Get team members for a team lead")
 async def get_team_members(
     team_lead_id: str,

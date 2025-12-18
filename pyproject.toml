@@ -15,6 +15,7 @@ dependencies = [
     "pydantic[email]>=2.12.5",
     "pyngrok>=7.5.0",
     "python-dotenv>=1.2.1",
+    "python-multipart>=0.0.21",
     "supabase>=2.24.0",
     "uvicorn>=0.38.0",
 ]

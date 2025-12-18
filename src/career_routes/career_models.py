@@ -1,8 +1,7 @@
 from datetime import date
 from typing import List, Optional
-from uuid import UUID
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field , EmailStr ,FilePath
+from fastapi import UploadFile, File
 
 
 class JobBase(BaseModel):
@@ -24,7 +23,7 @@ class JobBase(BaseModel):
     posted_date: Optional[date] = Field(default=None)
     job_status: Optional[str] = "open"
     
-    created_by: Optional[UUID] = None
+    created_by: Optional[str] = None
 
     job_type: Optional[str] = None  # 'internal' or 'external'
 
@@ -60,7 +59,24 @@ class UpdateJobs(BaseModel):
     posted_date: Optional[date] = Field(default=None)
     job_status: Optional[str] = None
     
-    created_by: Optional[UUID] = None
+    created_by: Optional[str] = None
 
    
 
+class JobApplications(BaseModel):
+    job_id: str
+    application_data: dict
+    email: EmailStr
+    mobile: str
+    resume_file : UploadFile | None = File(None)
+    remarks: Optional[str] = None
+    recruiter_id: Optional[str] = None
+    application_status: Optional[str] = "applied"
+
+
+class UpdateJobApplications(BaseModel):
+    application_data: Optional[dict] = None
+    email: Optional[EmailStr] = None
+    mobile: Optional[str] = None
+    remarks: Optional[str] = None
+    application_status: Optional[str] = "applied"
