@@ -9,6 +9,9 @@ from typing import  Optional
 from pydantic import  EmailStr 
 from fastapi import UploadFile, File ,Form
 from .career_checks import upload_file,get_file_url
+import requests
+from datetime import datetime
+from src.career_routes.career_settings import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET , LINKEDIN_COMPANY_URN
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/careers", tags=["careers"])
@@ -311,13 +314,13 @@ def job_details(job_id: str  ,job_type:str, supabase: Client = Depends(get_supab
         # [web:15][web:172]
 
         if getattr(res, "error", None):
-            logger.error("Failed to fetch job_id=%s: %s", job_id, res.error)
+            logger.error("Failed to fetch job_id=%s: %s", job_id, res)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to fetch job details",
             )
 
-        if not res.data:
+        if not res:
             logger.warning("User not found job_id=%s", job_id)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -350,7 +353,7 @@ async def job_applications(
     application_status: Optional[str] = Form("applied"),
     resume_file: UploadFile = File(...),        # required file
     supabase: Client = Depends(get_supabase_client),
-    _: str = Depends(get_current_user_id),
+    
 ):
     try:
         logger.info("Submitting application for job_id=%s", job_id)
@@ -567,3 +570,213 @@ async def update_job_application(
         )
     
 
+
+@router.get("/get_jobs/{job_type}/{job_id}", summary="Get job details by ID")
+async def get_job_by_id(
+    job_type: str,
+    job_id: str,
+    supabase: Client = Depends(get_supabase_client),
+):
+    """
+    Returns the job details by job_id.
+    """
+    try:
+        logger.info("Fetching job details for job_id=%s", job_id)
+        if job_type == 'internal':
+            res = supabase.table("internal_hiring_jobs").select("*").eq("job_id", job_id).maybe_single().execute()  # [web:15][web:172]
+        elif job_type == 'external':
+            res = supabase.table("external_hiring_jobs").select("*").eq("job_id", job_id).maybe_single().execute()  # [web:15][web:172]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid job_type. Use 'internal' or 'external'.",
+            )
+
+        if getattr(res, "error", None):
+            logger.error("Failed to fetch job_id=%s: %s", job_id, res.error)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch job details",
+            )
+
+        if not res.data:
+            logger.warning("Job not found job_id=%s", job_id)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Job not found",
+            )
+
+        logger.info("Fetched job details for job_id=%s", job_id)
+        return res.data
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.exception("Error fetching job_id=%s: %s", job_id, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch job details",
+        )
+    
+import base64
+from typing import Dict, Any
+
+@router.get("/post_jobs/{job_type}/{job_id}", summary="Get job details and post to LinkedIn")
+async def post_job_to_linkedin(
+    job_type: str,
+    job_id: str,
+    supabase: Client = Depends(get_supabase_client),
+):
+    """
+    Fetches job details by job_id from Supabase, transforms to LinkedIn schema, 
+    and posts to LinkedIn Job Posting API.
+    """
+    # ✅ Validate env vars first
+    if not all([LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_COMPANY_URN]):
+        raise HTTPException(
+            status_code=500,
+            detail="Missing LinkedIn environment variables: LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_COMPANY_URN"
+        )
+
+    try:
+        logger.info("Fetching job details for job_id=%s to post on LinkedIn", job_id)
+        
+        # Fetch job from Supabase
+        if job_type == 'internal':
+            res = supabase.table("internal_hiring_jobs").select("*").eq("id", job_id).maybe_single().execute()
+        elif job_type == 'external':
+            res = supabase.table("external_hiring_jobs").select("*").eq("id", job_id).maybe_single().execute()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid job_type. Use 'internal' or 'external'.",
+            )
+
+        if getattr(res, "error", None):
+            logger.error("Failed to fetch job_id=%s: %s", job_id, res.error)
+            raise HTTPException(status_code=500, detail="Failed to fetch job details")
+
+        if not res.data:
+            logger.warning("Job not found job_id=%s", job_id)
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        job_data: Dict[str, Any] = res.data
+        logger.info("Fetched job details for job_id=%s, posting to LinkedIn", job_id)
+
+        # ✅ FIXED TOKEN REQUEST - Most reliable method
+        credentials_str = f"{LINKEDIN_CLIENT_ID}:{LINKEDIN_CLIENT_SECRET}"
+        credentials_b64 = base64.b64encode(credentials_str.encode('utf-8')).decode('utf-8')
+        
+        token_url = "https://api.linkedin.com/v2/identityAsClient"
+        token_data = {"grant_type": "client_credentials"}
+        token_headers = {"Authorization": f"Basic {credentials_b64}"}
+        
+        logger.info("🔑 Requesting LinkedIn token for client: %s...", LINKEDIN_CLIENT_ID[:8])
+        
+        token_response = requests.post(token_url, data=token_data, headers=token_headers, timeout=30)
+        logger.info("📡 Token response: %s", token_response.status_code)
+        logger.info("📄 Token body: %s", token_response.text[:500])  # First 500 chars
+        
+        token_response.raise_for_status()
+        token_json = token_response.json()
+        access_token = token_json.get("access_token")
+        
+        if not access_token:
+            logger.error("❌ NO TOKEN: %s", token_json)
+            raise HTTPException(
+                status_code=401,
+                detail=f"Token request failed. Response: {token_json}"
+            )
+        logger.info("✅ Token obtained (length: %d chars)", len(access_token))
+
+        # ✅ Transform data safely
+        skills_text = ", ".join(job_data.get("key_skills", []))
+        
+        # Safe salary parsing
+        salary_str = str(job_data.get("salary", "0")).replace("$", "").replace(",", "").strip()
+        salary_parts = salary_str.split(" - ")
+        min_salary = float(salary_parts[0]) if len(salary_parts) > 0 and salary_parts[0].strip() else 0
+        max_salary = float(salary_parts[1]) if len(salary_parts) > 1 and salary_parts[1].strip() else min_salary
+        
+        # Safe datetime parsing
+        created_at = job_data.get("created_at", "2025-12-18T15:20:48Z")
+        try:
+            if 'Z' in created_at:
+                created_at = created_at.replace('Z', '+00:00')
+            created_dt = datetime.fromisoformat(created_at)
+            listed_at = int(created_dt.timestamp() * 1000)
+        except:
+            listed_at = int(datetime.now().timestamp() * 1000)
+        
+        exp_map = {
+            "0-2 years": "ENTRY_LEVEL", "2-5 years": "ASSOCIATE", 
+            "5-8 years": "MID_SENIOR", "8+ years": "SENIOR", "10+ years": "DIRECTOR"
+        }
+        experience_level = exp_map.get(job_data.get("experience", ""), "MID_SENIOR")
+        
+        # ✅ LinkedIn payload
+        linkedin_payload = {
+            "elements": [{
+                "externalJobPostingId": job_data.get("job_id", job_data.get("id", f"job_{job_id}")),
+                "jobPostingOperationType": "CREATE",
+                "title": str(job_data.get("job_title", "Job Title"))[:200],
+                "description": f"""
+                    <p>{job_data.get("job_description", "No description available.")}</p>
+                    <p><strong>Key Skills:</strong> {skills_text}</p>
+                    <p><strong>Experience:</strong> {job_data.get("experience", "N/A")} | 
+                       <strong>Type:</strong> {job_data.get("employment_type", "Full-time")} | 
+                       <strong>Openings:</strong> {job_data.get("openings", 1)} | 
+                       <strong>Location:</strong> {job_data.get("job_location", "Remote")}</p>
+                """.strip()[:25000],
+                "company": LINKEDIN_COMPANY_URN,
+                "companyApplyUrl": f"https://{job_data.get('company_name', 'company').lower().replace(' ', '')}.com/apply/{job_data.get('job_id', job_id)}",
+                "location": job_data.get("job_location", "Remote"),
+                "employmentType": "FULL_TIME" if "full" in str(job_data.get("employment_type", "")).lower() else "PART_TIME",
+                "experienceLevel": experience_level,
+                "salary": {
+                    "min": float(min_salary),
+                    "max": float(max_salary),
+                    "currency": "USD"
+                },
+                "listedAt": listed_at
+            }]
+        }
+
+        # Post to LinkedIn
+        api_url = "https://api.linkedin.com/v2/simpleJobPostings"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "X-Restli-Protocol-Version": "2.0.0"
+        }
+        
+        logger.info("🚀 Posting job to LinkedIn...")
+        response = requests.post(api_url, headers=headers, json=linkedin_payload, timeout=60)
+        logger.info("📡 LinkedIn response: %s - %s", response.status_code, response.text[:500])
+        
+        response.raise_for_status()
+        result = response.json()
+        task_id = result.get("elements", [{}])[0].get("jobPostingTask", {}).get("id", "unknown")
+        
+        logger.info("✅ SUCCESS: Posted job %s to LinkedIn (task: %s)", job_id, task_id)
+        
+        return {
+            "original_job_data": job_data,
+            "linkedin_posting": {
+                "task_id": task_id,
+                "status": "success",
+                "message": "Job posting created successfully!",
+                "poll_url": f"https://api.linkedin.com/v2/simpleJobPostings?q=jobPostingTask&jobPostingTask={task_id}",
+                "posted_at": datetime.now().isoformat()
+            }
+        }
+        
+    except requests.exceptions.HTTPError as e:
+        error_detail = e.response.text if hasattr(e, 'response') and e.response else str(e)
+        logger.error("LinkedIn API error for job_id=%s: %s", job_id, error_detail)
+        raise HTTPException(
+            status_code=getattr(e.response, 'status_code', 500),
+            detail=f"LinkedIn API error: {error_detail}"
+        )
+    except Exception as e:
+        logger.exception("Error processing job_id=%s", job_id)
+        raise HTTPException(status_code=500, detail=f"Failed to post job: {str(e)}")

@@ -15,6 +15,7 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     role: str | None = None
     mobile: str | None = None
+    office_mail: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):

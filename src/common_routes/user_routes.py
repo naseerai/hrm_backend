@@ -8,6 +8,7 @@ import logging
 from src.login.login_checks import get_current_user_id 
 from .common_checks import get_supabase_client, generate_user_based_password , send_email
 from .common_setting import SUPABASE_URL, SUPABASE_ANON_KEY,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD
+from src.career_routes.career_checks import upload_file,get_file_url
 load_dotenv()
 router = APIRouter(prefix="/users", tags=["users"])
 logger = logging.getLogger(__name__)
@@ -16,54 +17,213 @@ logger = logging.getLogger(__name__)
 
 
 
+# @router.post("/create/user", status_code=status.HTTP_201_CREATED)
+# async def create_user(
+#     payload: UserCreate,
+#     supabase: Client = Depends(get_supabase_client),background_tasks: BackgroundTasks =None,user_id: str = Depends(get_current_user_id)
+# ):
+#     # Check duplicate email
+#     try:
+#         logger.info("User creation attempt by user_id=%s for email=%s", user_id, payload.email)
+#         existing = (
+#             supabase
+#             .table("users")
+#             .select("id")
+#             .or_(f"email.eq.{payload.email},mobile.eq.{payload.mobile}")
+#             .maybe_single()
+#             .execute()
+#         )  # [web:171][web:179][web:182]
+#         if existing is not None:
+#             logger.warning("User creation failed: email or mobile already exists email=%s mobile=%s", payload.email, payload.mobile)
+#             raise HTTPException(
+#                 status_code=status.HTTP_400_BAD_REQUEST,
+#                 detail="Email or mobile already exists",
+#             )
+#         password = await generate_user_based_password(payload.name, payload.email)
+#         template_path = "src/common_routes/email_templates/office_mail_template.html"
+#         smtp_server = SMTP_HOST
+#         smtp_port = SMTP_PORT
+#         smtp_username = SMTP_USERNAME
+#         smtp_password = SMTP_PASSWORD
+
+#         # Insert row (no id / created_at provided, DB defaults are used)
+#         to_insert = {
+#             "name": payload.name,
+#             "email": payload.email,
+#             "office_mail": payload.office_mail,
+#             "password": password,  # plain text as requested (not safe)
+#             "role": payload.role,
+#             "mobile": payload.mobile,
+#             "createdby": payload.created_by,
+#             "designation": payload.designation,
+#         }
+
+#         mail_data = {
+#             "name": payload.name,
+#             "office_mail": payload.office_mail,
+#             "password": password,
+#             "role": payload.role,
+#         }
+#         receiver_email = payload.email
+#         subject = "Your Account Details"
+#         background_tasks.add_task(
+#             send_email,
+#             template_path,
+#             mail_data,
+#             receiver_email,
+#             subject,
+#             smtp_server,
+#             smtp_port,
+#             smtp_username,
+#             smtp_password,
+#         )
+#         logger.info("Email sending task added for user email=%s", payload.email)
+
+#         res = supabase.table("users").insert(to_insert).execute()  # [web:161]
+#         # print(f"this is response : \n\n\n\n{res}\n\n\n\n\n")
+#         if not res:
+#             logger.error("User creation failed for email=%s", payload.email)
+#             raise HTTPException(
+#                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#                 detail="Failed to create user",
+#             )
+#         created = res.data[0]
+#         if payload.designation == "team_lead":
+#             # Additional logic for team leaders can be added here
+#             adding_team_leader = supabase.table("teams").insert({"team_lead":created.get("id")}).execute()
+#             logger.info("Additional setup for team leader email=%s", adding_team_leader)
+
+#         elif payload.designation == "team_member":
+#             team_lead_id = payload.team_lead_id
+
+#             # 1) Get the current team row for that leader
+#             team_res = (
+#                 supabase
+#                 .table("teams")
+#                 .select("id, team_members")
+#                 .eq("team_lead", team_lead_id)
+#                 .maybe_single()
+#                 .execute()
+#             )
+
+#             team = team_res.data
+#             if not team:
+#                 raise HTTPException(
+#                     status_code=400,
+#                     detail="Team for the given team_lead_id not found",
+#                 )
+
+#             current_members = team.get("team_members") or []
+#             if created["id"] not in current_members:
+#                 new_members = current_members + [created["id"]]
+
+#                 # 2) Save the updated list
+#                 supabase.table("teams").update(
+#                     {"team_members": new_members}
+#                 ).eq("team_lead", team_lead_id).execute()
+#             logger.info("Additional setup for team member email=%s", team_lead_id)
+#                 # Return minimal info (you can shape this how you like)
+                
+#         logger.info("User created successfully user_id=%s email=%s", created.get("id"), created.get("email"))
+#         return {
+#             "id": created.get("id"),
+#             "email": created.get("email"),
+#             "name": created.get("name"),
+            
+#         }
+#     except HTTPException as he:
+#         raise he
+#     except Exception as e:
+#         logger.exception("Error creating user email=%s: %s", payload.email, str(e))
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Failed to create user",
+#         )
+
+
+from fastapi import UploadFile, File, Form, Depends, BackgroundTasks, HTTPException, status
+from typing import Optional
+import tempfile
+import os
+import shutil
+
 @router.post("/create/user", status_code=status.HTTP_201_CREATED)
 async def create_user(
-    payload: UserCreate,
-    supabase: Client = Depends(get_supabase_client),background_tasks: BackgroundTasks =None,user_id: str = Depends(get_current_user_id)
+    name: str = Form(...),
+    email: str = Form(...),
+    office_mail: Optional[str] = Form(None),
+    role: Optional[str] = Form(None),
+    mobile: Optional[str] = Form(None),
+    created_by: Optional[str] = Form(None),
+    designation: Optional[str] = Form(None),
+    team_lead_id: Optional[str] = Form(None),
+    profile_picture: Optional[UploadFile] = File(None),
+    supabase: Client = Depends(get_supabase_client),
+    background_tasks: BackgroundTasks = None,
+    user_id: str = Depends(get_current_user_id)
 ):
     # Check duplicate email
     try:
-        logger.info("User creation attempt by user_id=%s for email=%s", user_id, payload.email)
+        logger.info("User creation attempt by user_id=%s for email=%s", user_id, email)
         existing = (
             supabase
             .table("users")
             .select("id")
-            .or_(f"email.eq.{payload.email},mobile.eq.{payload.mobile}")
+            .or_(f"email.eq.{email},mobile.eq.{mobile}")
             .maybe_single()
             .execute()
-        )  # [web:171][web:179][web:182]
+        )
         if existing is not None:
-            logger.warning("User creation failed: email or mobile already exists email=%s mobile=%s", payload.email, payload.mobile)
+            logger.warning("User creation failed: email or mobile already exists email=%s mobile=%s", email, mobile)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email or mobile already exists",
             )
-        password = await generate_user_based_password(payload.name, payload.email)
+        
+        password = await generate_user_based_password(name, email)
         template_path = "src/common_routes/email_templates/office_mail_template.html"
         smtp_server = SMTP_HOST
         smtp_port = SMTP_PORT
         smtp_username = SMTP_USERNAME
         smtp_password = SMTP_PASSWORD
 
-        # Insert row (no id / created_at provided, DB defaults are used)
+        # Handle profile picture upload
+        profile_picture_url = None
+        if profile_picture and profile_picture.filename:
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{profile_picture.filename}") as tmp_file:
+                shutil.copyfileobj(profile_picture.file, tmp_file)
+                tmp_file_path = tmp_file.name
+            
+            try:
+                # Upload to MinIO and get object name
+                object_name = await upload_file(tmp_file_path, f"user_profile_{email}_{profile_picture.filename}")
+                profile_picture_url = object_name
+                logger.info("Profile picture uploaded: %s", profile_picture_url)
+            finally:
+                # Clean up temp file
+                os.unlink(tmp_file_path)
+
+        # Prepare user data for insertion
         to_insert = {
-            "name": payload.name,
-            "email": payload.email,
-            "office_mail": payload.office_mail,
-            "password": password,  # plain text as requested (not safe)
-            "role": payload.role,
-            "mobile": payload.mobile,
-            "createdby": payload.created_by,
-            "designation": payload.designation,
+            "name": name,
+            "email": email,
+            "office_mail": office_mail,
+            "password": password,
+            "role": role,
+            "mobile": mobile,
+            "createdby": created_by,
+            "designation": designation,
+            "user_profile_picture": profile_picture_url,  # Add to users table
         }
 
         mail_data = {
-            "name": payload.name,
-            "office_mail": payload.office_mail,
+            "name": name,
+            "office_mail": office_mail,
             "password": password,
-            "role": payload.role,
+            "role": role,
         }
-        receiver_email = payload.email
+        receiver_email = email
         subject = "Your Account Details"
         background_tasks.add_task(
             send_email,
@@ -76,26 +236,26 @@ async def create_user(
             smtp_username,
             smtp_password,
         )
-        logger.info("Email sending task added for user email=%s", payload.email)
+        logger.info("Email sending task added for user email=%s", email)
 
-        res = supabase.table("users").insert(to_insert).execute()  # [web:161]
-        # print(f"this is response : \n\n\n\n{res}\n\n\n\n\n")
+        res = supabase.table("users").insert(to_insert).execute()
         if not res:
-            logger.error("User creation failed for email=%s", payload.email)
+            logger.error("User creation failed for email=%s", email)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create user",
             )
+        
         created = res.data[0]
-        if payload.designation == "team_lead":
-            # Additional logic for team leaders can be added here
-            adding_team_leader = supabase.table("teams").insert({"team_lead":created.get("id")}).execute()
+        
+        if designation == "team_lead":
+            adding_team_leader = supabase.table("teams").insert({"team_lead": created.get("id")}).execute()
             logger.info("Additional setup for team leader email=%s", adding_team_leader)
 
-        elif payload.designation == "team_member":
-            team_lead_id = payload.team_lead_id
-
-            # 1) Get the current team row for that leader
+        elif designation == "team_member":
+            if not team_lead_id:
+                raise HTTPException(status_code=400, detail="team_lead_id required for team_member")
+            
             team_res = (
                 supabase
                 .table("teams")
@@ -104,36 +264,28 @@ async def create_user(
                 .maybe_single()
                 .execute()
             )
-
             team = team_res.data
             if not team:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Team for the given team_lead_id not found",
-                )
+                raise HTTPException(status_code=400, detail="Team for the given team_lead_id not found")
 
             current_members = team.get("team_members") or []
             if created["id"] not in current_members:
                 new_members = current_members + [created["id"]]
+                supabase.table("teams").update({"team_members": new_members}).eq("team_lead", team_lead_id).execute()
+            logger.info("Team member added to team_lead=%s", team_lead_id)
 
-                # 2) Save the updated list
-                supabase.table("teams").update(
-                    {"team_members": new_members}
-                ).eq("team_lead", team_lead_id).execute()
-            logger.info("Additional setup for team member email=%s", team_lead_id)
-                # Return minimal info (you can shape this how you like)
-                
         logger.info("User created successfully user_id=%s email=%s", created.get("id"), created.get("email"))
         return {
             "id": created.get("id"),
             "email": created.get("email"),
             "name": created.get("name"),
-            
+            "user_profile_picture": created.get("user_profile_picture")
         }
+    
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.exception("Error creating user email=%s: %s", payload.email, str(e))
+        logger.exception("Error creating user email=%s: %s", email, str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user",
@@ -141,7 +293,7 @@ async def create_user(
 
 
 @router.get("/user/profile", summary="Get current user details")
-def read_me(user_id: str = Depends(get_current_user_id) , supabase: Client = Depends(get_supabase_client)):
+async def read_me(user_id: str = Depends(get_current_user_id) , supabase: Client = Depends(get_supabase_client)):
     """
     Returns the current user's details.
     """
@@ -163,8 +315,18 @@ def read_me(user_id: str = Depends(get_current_user_id) , supabase: Client = Dep
                 detail="User not found",
             )
 
+        user_data = res.data  # Extract single user object
+        
+        # Convert object name to full MinIO URL if profile picture exists
+        if user_data.get("user_profile_picture"):
+            logger.info("Generating profile picture URL for user_id=%s", user_id)
+            profile_picture_url = await get_file_url(user_data["user_profile_picture"])
+            user_data["user_profile_picture"] = profile_picture_url  # Add full URL
+            
+        else:
+            user_data["profile_picture_url"] = None
         logger.info("Fetched user details for user_id=%s", user_id)
-        return res.data
+        return user_data
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -176,17 +338,19 @@ def read_me(user_id: str = Depends(get_current_user_id) , supabase: Client = Dep
 
 
 
+
+
 @router.get("/allusers", summary="Get all users")
-def get_all_users(
-    _: str = Depends(get_current_user_id),          # require auth
+async def get_all_users(
+    _: str = Depends(get_current_user_id),  # require auth
     supabase: Client = Depends(get_supabase_client)
 ):
     """
-    Returns all users from the `users` table.
+    Returns all users from the `users` table with profile picture URLs.
     """
     try:
         logger.info("Fetching all users requested by user_id=%s", _)
-        res = supabase.table("users").select("*").execute()  # [web:15]
+        res = supabase.table("users").select("*").execute()
 
         if getattr(res, "error", None):
             logger.error("Failed to fetch users: %s", res.error)
@@ -194,9 +358,23 @@ def get_all_users(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to fetch users",
             )
-        logger.info("Fetched %d users", len(res.data))
-        # Supabase Python client returns rows in `data` [web:15][web:172]
+
+        # Process each user to convert object name to full MinIO URL
+        for user_data in res.data:
+            if user_data.get("user_profile_picture"):
+                try:
+                    logger.info("Generating profile picture URL for user_id=%s", user_data["id"])
+                    profile_picture_url = await get_file_url(user_data["user_profile_picture"])
+                    user_data["user_profile_picture"] = profile_picture_url  # Overwrite with full URL
+                except Exception as e:
+                    logger.warning("Failed to generate profile URL for user %s: %s", user_data["id"], e)
+                    user_data["user_profile_picture"] = None  # Fallback to None
+            else:
+                user_data["user_profile_picture"] = None  # Consistent null handling
+
+        logger.info("Fetched and processed %d users", len(res.data))
         return res.data
+        
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -451,7 +629,20 @@ async def get_all_team_leads(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to fetch team leads",
             )
+        
+        for user_data in res.data:
+            if user_data.get("user_profile_picture"):
+                try:
+                    logger.info("Generating profile picture URL for user_id=%s", user_data["id"])
+                    profile_picture_url = await get_file_url(user_data["user_profile_picture"])
+                    user_data["user_profile_picture"] = profile_picture_url  # Overwrite with full URL
+                except Exception as e:
+                    logger.warning("Failed to generate profile URL for user %s: %s", user_data["id"], e)
+                    user_data["user_profile_picture"] = None  # Fallback to None
+            else:
+                user_data["user_profile_picture"] = None  # Consistent null handling
         logger.info("Fetched %d team leads", len(res.data))
+
         return res.data
     except HTTPException as he:
         raise he
@@ -473,6 +664,9 @@ async def get_all_team_members(
     """
     try:
         logger.info("Fetching all team members requested by user_id=%s", _)
+        debug_res = supabase.table("users").select("id, name, designation").execute()
+        logger.info("ALL DESIGNATIONS: %s", [u['designation'] for u in debug_res.data])
+
         res = supabase.table("users").select("*").eq("designation", "team_member").execute()  # [web:15]
 
         if getattr(res, "error", None):
@@ -481,6 +675,17 @@ async def get_all_team_members(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to fetch team members",
             )
+        for user_data in res.data:
+            if user_data.get("user_profile_picture"):
+                try:
+                    logger.info("Generating profile picture URL for user_id=%s", user_data["id"])
+                    profile_picture_url = await get_file_url(user_data["user_profile_picture"])
+                    user_data["user_profile_picture"] = profile_picture_url  # Overwrite with full URL
+                except Exception as e:
+                    logger.warning("Failed to generate profile URL for user %s: %s", user_data["id"], e)
+                    user_data["user_profile_picture"] = None  # Fallback to None
+            else:
+                user_data["user_profile_picture"] = None  # Consistent null handling
         logger.info("Fetched %d team members", len(res.data))
         return res.data
     except HTTPException as he:
@@ -520,7 +725,7 @@ async def get_team_members(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to fetch team members",
             )
-
+        
         team = team_res.data
         if not team or not team.get("team_members"):
             logger.warning("No team members found for team_lead_id=%s", team_lead_id)
@@ -542,6 +747,18 @@ async def get_team_members(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to fetch team members",
             )
+
+        for member_data in members_res.data:
+            if member_data.get("user_profile_picture"):
+                try:
+                    logger.info("Generating profile picture URL for team member %s", member_data["id"])
+                    profile_picture_url = await get_file_url(member_data["user_profile_picture"])
+                    member_data["user_profile_picture"] = profile_picture_url  # Overwrite with full URL
+                except Exception as e:
+                    logger.warning("Failed to generate profile URL for team member %s: %s", member_data["id"], e)
+                    member_data["user_profile_picture"] = None  # Fallback to None
+            else:
+                member_data["user_profile_picture"] = None  # Consistent null handling
 
         logger.info("Fetched %d team members for team_lead_id=%s", len(members_res.data), team_lead_id)
         return members_res.data

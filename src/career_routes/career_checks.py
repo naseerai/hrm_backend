@@ -58,7 +58,7 @@ async def get_file_url(object_name: str) -> str:
             object_name=object_name,
             expires=timedelta(days=7)  # URL valid for 7 days
         )
-        logger.info(f"Presigned URL generated: {url}")
+        # logger.info(f"Presigned URL generated: {url}")
         return url
     except S3Error as e:
         logger.error(f"Error generating presigned URL: {e}")
