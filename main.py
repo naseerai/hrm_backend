@@ -7,7 +7,7 @@ import logging
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from src.career_routes.careers_routes import router as careers_router
 from src.calendar_routes.calendar_main_routes import router as calendar_router
-from src.leaves_routes.leaves_main_routes import router as leaves_router
+#from src.leaves_routes.leaves_main_routes import router as leaves_router
 from src.attendance_routes.attendance_main_routes import router as attendance_router
 logging.basicConfig(
     level=logging.INFO,
